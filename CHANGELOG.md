@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.0.1
+- **Mobile** : la carte ne déborde plus de l'écran quand une opération a un titre long. Les montants, le lien « Historique » et les textes restent visibles sur téléphone.
+
 ## 1.0.0
 Première version.
 

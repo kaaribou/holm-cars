@@ -1,6 +1,6 @@
 """Constantes de HOLM Cars."""
 DOMAIN = "holm_cars"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 STORAGE_KEY = "holm_cars"
 STORAGE_VERSION = 1
 CARD_URL = "/holm_cars_static/holm-cars-card.js"
