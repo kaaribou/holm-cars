@@ -1,0 +1,6 @@
+{
+  "config": {
+    "step": {"user": {"title": "HOLM Cars", "description": "Entretien, dépenses, carburant et recharges de vos voitures. Ajoutez ensuite la carte « HOLM Cars » à un tableau de bord : tout se règle depuis la carte."}},
+    "abort": {"single_instance_allowed": "HOLM Cars est déjà installé."}
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "config": {
+    "step": {"user": {"title": "HOLM Cars", "description": "Maintenance, costs, fuel and charging for your cars. Then add the \"HOLM Cars\" card to a dashboard: everything is set up from the card."}},
+    "abort": {"single_instance_allowed": "HOLM Cars is already installed."}
+  }
+}
