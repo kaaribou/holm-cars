@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 
-from .const import COST_TYPES, DEFAULT_SETTINGS, ENERGIES, RECORD_TYPES, SIGNAL_UPDATED, SIGNAL_VEHICLES, STORAGE_KEY, STORAGE_VERSION
+from .const import COST_TYPES, DEFAULT_SETTINGS, ELECTRIC_ONLY_KINDS, ENERGIES, KINDS, RECORD_TYPES, SIGNAL_UPDATED, SIGNAL_VEHICLES, STORAGE_KEY, STORAGE_VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class CarsStore:
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
-        self.data: dict = {"vehicles": {}, "records": {}, "reminders": {}, "settings": dict(DEFAULT_SETTINGS)}
+        self.data: dict = {"vehicles": {}, "records": {}, "reminders": {}, "settings": dict(DEFAULT_SETTINGS), "charge_sessions": {}}
         self.files_dir = hass.config.path("holm_cars")
         self.live_odometer: dict[str, float] = {}   # relevé en direct (entité) par véhicule
 
@@ -64,7 +64,7 @@ class CarsStore:
     async def async_load(self) -> None:
         d = await self._store.async_load()
         if isinstance(d, dict):
-            for k in ("vehicles", "records", "reminders"):
+            for k in ("vehicles", "records", "reminders", "charge_sessions"):
                 if isinstance(d.get(k), dict):
                     self.data[k] = d[k]
             self.data["settings"] = {**DEFAULT_SETTINGS, **(d.get("settings") or {})}
@@ -76,6 +76,11 @@ class CarsStore:
         async_dispatcher_send(self.hass, SIGNAL_UPDATED)
         if vehicles:
             async_dispatcher_send(self.hass, SIGNAL_VEHICLES)
+
+    @callback
+    def save_later(self) -> None:
+        """Enregistre sans prévenir la carte (données internes : recharge en cours…)."""
+        self._store.async_delay_save(lambda: self.data, 5.0)
 
     # ---------------------------------------------------------------- calculs
     def records_of(self, vid: str, types=None) -> list[dict]:
@@ -184,8 +189,12 @@ class CarsStore:
         vid = d.get("id") or new_id()
         old = self.data["vehicles"].get(vid, {"created": time.time()})
         v = {**old, **{k: d[k] for k in d if k != "summary"}, "id": vid}
+        if v.get("kind") not in KINDS:
+            v["kind"] = "voiture"
         if v.get("energy") not in ENERGIES:
             v["energy"] = "essence"
+        if v["kind"] in ELECTRIC_ONLY_KINDS:
+            v["energy"] = "electrique"
         for k in ("year", "initial_odometer"):
             v[k] = _num(v.get(k), int) if k == "year" else _num(v.get(k))
         for k in ("purchase_price", "sold_price"):

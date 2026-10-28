@@ -1,6 +1,6 @@
 """Constantes de HOLM Cars."""
 DOMAIN = "holm_cars"
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 STORAGE_KEY = "holm_cars"
 STORAGE_VERSION = 1
 CARD_URL = "/holm_cars_static/holm-cars-card.js"
@@ -15,6 +15,9 @@ MAX_UPLOAD = 25 * 1024 * 1024
 RECORD_TYPES = ("entretien", "reparation", "amelioration", "carburant", "recharge", "frais", "km")
 COST_TYPES = ("entretien", "reparation", "amelioration", "carburant", "recharge", "frais")
 ENERGIES = ("essence", "diesel", "electrique", "hybride", "hybride_rechargeable", "gpl", "e85")
+# types de véhicules (#2) ; les engins légers sont forcément électriques
+KINDS = ("voiture", "moto", "scooter", "velo_electrique", "trottinette", "utilitaire", "camping_car", "autre")
+ELECTRIC_ONLY_KINDS = ("velo_electrique", "trottinette")
 
 DEFAULT_SETTINGS = {
     "notify_targets": [],          # services notify.* (téléphones…)

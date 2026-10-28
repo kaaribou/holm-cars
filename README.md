@@ -14,12 +14,12 @@ HOLM Cars remplace le carnet d'entretien et le tableur : vous notez les entretie
 
 ### En bref
 
-- 🚘 **Garage** : toutes vos voitures en vignettes, avec une pastille quand un entretien approche.
+- 🚘 **Garage** : tous vos véhicules en vignettes (voiture, moto, scooter, vélo ou trottinette électrique, utilitaire, camping-car…), avec une pastille quand un entretien approche.
 - 🧾 **Historique** : entretiens, réparations, équipements, pleins, recharges, frais (assurance, carte grise, péage…) et relevés kilométriques, classés par mois, avec recherche et filtres. Joignez factures et photos.
 - 🔔 **Rappels** par date **et/ou** kilométrage, le premier atteint : contrôle technique, vidange, courroie, pneus, assurance… Périodiques : ils se reprogramment quand vous les marquez « Fait ». Notification sur vos téléphones et dans Home Assistant, N jours ou N km avant.
 - 📊 **Insights** : dépenses par mois et par poste, coût au km, kilomètres par mois, consommation (L/100 km ou kWh/100 km), prix du litre ou du kWh, plus gros postes, dépenses à prévoir sur 12 mois, comparaison des voitures.
-- 🔌 **Voiture connectée** : le kilométrage se met à jour depuis une entité, et chaque fin de recharge crée une recharge (kWh, coût, batterie) à partir des entités de la voiture.
-- 📥 **Import LubeLogger** par son API (voitures, opérations, rappels, photos, factures) ou par ses fichiers CSV. Relancer l'import met à jour sans doublons.
+- 🔌 **Voiture connectée** : le kilométrage se met à jour depuis une entité, et chaque fin de recharge crée une recharge (kWh, coût, batterie) à partir des entités de la voiture. Avec un tarif HP/HC ou Tempo, chaque kWh est compté **au prix du moment**.
+- 📥 **Import** depuis LubeLogger (API ou CSV), ou depuis **Excel et toute autre application** grâce au **modèle CSV HOLM Cars**. Relancer l'import met à jour sans doublons.
 - 📱 Pensé pour le téléphone autant que pour l'ordinateur.
 
 | Rappels | Insights | Sur téléphone |
@@ -72,12 +72,41 @@ Dans la fiche de la voiture → **Voiture connectée** :
 - **Compteur kilométrique** : une entité en km (ou en miles, convertie). Un relevé par jour est enregistré.
 - **Recharges automatiques** (électrique ou hybride rechargeable) : l'entité « en charge », l'énergie chargée en kWh (compteur cumulé ou par recharge), le prix du kWh (fixe ou depuis une entité) et, si vous l'avez, le niveau de batterie.
 
+**Coût d'une recharge avec un prix venant d'une entité** (ex. `sensor.tarif_actuel` de [HOLM HP/HC](https://github.com/kaaribou/holm-tarif)) : à chaque hausse du compteur d'énergie pendant la recharge, les kWh ajoutés sont comptés **au prix en vigueur à cet instant**. Une recharge qui commence en heures creuses et finit en heures pleines (ou qui change de couleur Tempo) est donc payée au bon prix. Le coût est la somme des tranches, le prix affiché est le prix moyen, et le détail apparaît dans la recharge (« 18,2 kWh à 0,1296 € · 4,1 kWh à 0,1609 € »). La recharge en cours est conservée si Home Assistant redémarre.
+
+Avec un prix fixe, ou si le compteur n'est connu qu'en fin de recharge, le coût reste kWh × prix.
+
+### Type de véhicule
+
+Dans la fiche du véhicule, choisissez son **type** : voiture, moto, scooter, vélo électrique, trottinette électrique, utilitaire, camping-car ou autre. L'icône s'adapte partout dans la carte ; un vélo ou une trottinette est forcément électrique.
+
 ### Import depuis LubeLogger
 
 **Réglages → Importer depuis LubeLogger** :
 
 - **Par l'API** : adresse de LubeLogger vue depuis Home Assistant, et identifiant / mot de passe d'un compte (ou une clé d'API). Choisissez les voitures, l'import récupère tout, photos et factures comprises. Les identifiants ne sont pas enregistrés.
 - **Par CSV** : dans LubeLogger, exportez chaque onglet en CSV, puis importez-les un par un dans la voiture voulue. Le type est détecté, les dates françaises et américaines sont reconnues.
+
+### Import depuis Excel ou une autre application (modèle CSV)
+
+**Réglages → Par un fichier CSV → Télécharger le modèle** : ouvrez `modele-holm-cars.csv` dans Excel (ou LibreOffice, Numbers…), remplissez une ligne par opération en recopiant les données de votre ancienne application, enregistrez en CSV, puis importez-le dans le véhicule voulu.
+
+| Colonne | Contenu | Exemple |
+|---|---|---|
+| `type` | `carburant`, `recharge`, `entretien`, `reparation`, `amelioration`, `frais` ou `km` (des mots proches sont reconnus : plein, vidange, révision, assurance, péage, relevé…) | `entretien` |
+| `date` | Date de l'opération (`15/01/2026` ou `2026-01-15`) | `15/01/2026` |
+| `km` | Kilométrage au compteur | `45200` |
+| `description` | Intitulé | `Vidange` |
+| `cout` | Montant (virgule ou point) | `129,90` |
+| `quantite` | Litres ou kWh (carburant, recharge) | `38,5` |
+| `plein` | Plein / recharge complète : `oui` ou `non` | `oui` |
+| `categorie` | Station, garage ou lieu de recharge | `Garage Dupont` |
+| `notes` | Remarques | `Huile 5W30` |
+| `etiquettes` | Étiquettes séparées par des virgules | `garantie, constructeur` |
+
+- Seule la colonne `date` est obligatoire ; l'ordre des colonnes est libre, les majuscules et les accents sont ignorés (`Coût (€)`, `Kilométrage`, `Quantité` sont reconnus).
+- Séparateur `;` ou `,`, encodage UTF-8. Sans colonne `type`, toutes les lignes prennent le type choisi dans la fenêtre d'import.
+- Pour un véhicule électrique, les lignes `carburant` deviennent des recharges. Les lignes déjà importées sont ignorées.
 
 ## Entités
 
@@ -102,6 +131,7 @@ Tout reste chez vous : les données sont dans `config/.storage/holm_cars`, les p
 |---|---|
 | Pas de consommation affichée | Il faut deux pleins (ou recharges) **complets** avec le kilométrage. Cochez « Un plein précédent manque » si vous en avez oublié un. |
 | L'import API échoue | L'adresse doit être joignable depuis Home Assistant (pas `localhost`). Essayez une clé d'API, ou l'import CSV. |
+| Mon application n'est pas LubeLogger | Exportez vos données en CSV ou Excel, puis recopiez-les dans le **modèle CSV HOLM Cars** (voir plus haut). |
 | La carte ne s'affiche pas | Videz le cache du navigateur (Ctrl + F5) après une mise à jour. |
 
 ---

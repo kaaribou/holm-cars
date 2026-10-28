@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.0
+- **Recharges au tarif du moment** ([#1](https://github.com/kaaribou/holm-cars/issues/1)) : avec un prix du kWh venant d'une entité (HOLM HP/HC, Tempo…), chaque hausse du compteur d'énergie pendant la recharge est comptée au prix en vigueur à cet instant. Coût = somme des tranches, prix moyen affiché, détail dans la recharge (« 18,2 kWh à 0,1296 € · 4,1 kWh à 0,1609 € »). La recharge en cours survit à un redémarrage de Home Assistant (et une recharge terminée pendant l'arrêt est enregistrée au démarrage). Prix fixe : comportement inchangé.
+- **Type de véhicule** ([#2](https://github.com/kaaribou/holm-cars/issues/2)) : voiture, moto, scooter, vélo électrique, trottinette électrique, utilitaire, camping-car ou autre, avec l'icône qui va avec. Vélo et trottinette : forcément électriques. Les véhicules existants restent des voitures.
+- **Modèle CSV HOLM Cars** ([#3](https://github.com/kaaribou/holm-cars/issues/3)) : bouton « Télécharger le modèle » dans l'import CSV, pour importer depuis Excel ou n'importe quelle autre application. Colonnes en français (accents et majuscules ignorés), colonne `type` pour mélanger les opérations dans un seul fichier, `;` et virgule décimale acceptés. Le résultat de l'import détaille le nombre d'opérations par type.
+
 ## 1.0.1
 - **Mobile** : la carte ne déborde plus de l'écran quand une opération a un titre long. Les montants, le lien « Historique » et les textes restent visibles sur téléphone.
 

@@ -7,6 +7,7 @@ import logging
 import mimetypes
 import os
 import re
+import unicodedata
 from datetime import date, datetime
 
 import aiohttp
@@ -92,9 +93,17 @@ def parse_date(v, day_first: bool = True) -> str | None:
     return None
 
 
+def _key(k) -> str:
+    """Nom de colonne normalisé : minuscules, sans accents, espaces, tirets ni soulignés (« Coût (€) » → « cout€ »)."""
+    k = unicodedata.normalize("NFKD", str(k or "").strip().lower())
+    k = "".join(c for c in k if not unicodedata.combining(c))
+    k = re.sub(r"\(.*?\)", "", k)
+    return re.sub(r"[\s_\-./]", "", k)
+
+
 def _g(row: dict, *keys):
-    """Valeur d'un champ, quelle que soit la casse (camelCase de l'API, en-têtes CSV…)."""
-    low = {str(k).lower().replace(" ", "").replace("_", ""): v for k, v in row.items()}
+    """Valeur d'un champ, quelle que soit la casse (camelCase de l'API, en-têtes CSV, colonnes en français…)."""
+    low = {_key(k): v for k, v in row.items()}
     for k in keys:
         v = low.get(k.lower())
         if v not in (None, ""):
@@ -284,18 +293,55 @@ async def run_import(hass, store: CarsStore, client: LubeClient, vehicle_ids: li
 
 # ------------------------------------------------------------------ CSV
 CSV_KINDS = {
-    "carburant": {"fuelconsumed", "fuelconsumption", "gallons", "liters", "litres"},
+    "carburant": {"fuelconsumed", "fuelconsumption", "gallons", "liters", "litres", "quantite", "kwh"},
     "km": {"initialodometer"},
 }
 
+# Format CSV HOLM Cars (modèle téléchargeable dans la carte, #3) : une ligne par opération,
+# colonne « type » facultative pour mélanger les opérations dans un même fichier.
+COLS = {
+    "date": ("date", "jour"),
+    "odometer": ("odometer", "mileage", "km", "kilometrage", "compteur", "kilometres"),
+    "title": ("description", "libelle", "intitule", "titre", "intervention", "operation"),
+    "cost": ("cost", "cout", "montant", "prix", "price", "total", "cout€", "montant€", "prixtotal"),
+    "qty": ("fuelconsumed", "fuelconsumption", "gallons", "liters", "litres", "quantite", "volume", "kwh", "energie"),
+    "full": ("isfilltofull", "filltofull", "plein", "pleincomplet", "rechargecomplete", "complet"),
+    "missed": ("missedfuelup", "pleinmanquant"),
+    "category": ("categorie", "lieu", "station", "garage", "fournisseur", "category"),
+    "notes": ("notes", "note", "remarques", "remarque", "commentaire", "commentaires"),
+    "tags": ("tags", "etiquettes", "etiquette"),
+    "type": ("type", "typeoperation", "nature"),
+}
+TYPE_WORDS = {
+    "carburant": ("carburant", "plein", "essence", "diesel", "gazole", "fuel", "gas", "gpl", "e85"),
+    "recharge": ("recharge", "charge", "electricite", "electrique", "kwh"),
+    "entretien": ("entretien", "revision", "vidange", "service", "maintenance"),
+    "reparation": ("reparation", "repair", "panne"),
+    "amelioration": ("amelioration", "equipement", "accessoire", "upgrade"),
+    "frais": ("frais", "assurance", "peage", "parking", "taxe", "tax", "cartegrise", "amende", "credit", "loa", "lld"),
+    "km": ("km", "kilometrage", "releve", "odometre", "odometer", "compteur"),
+}
+
+
+def row_type(v) -> str | None:
+    k = _key(v)
+    if not k:
+        return None
+    for kind, words in TYPE_WORDS.items():
+        if k in words or any(k.startswith(w) for w in words if len(w) > 3):
+            return kind
+    return None
+
 
 def csv_kind(headers: list[str]) -> str:
-    hs = {h.lower().replace(" ", "").replace("_", "") for h in headers}
+    hs = {_key(h) for h in headers}
+    if hs & set(COLS["type"]):
+        return "mixte"
     for kind, keys in CSV_KINDS.items():
         if hs & keys:
             return kind
-    if "odometer" in hs or "mileage" in hs:
-        return "entretien" if "description" in hs else "km"
+    if hs & {"odometer", "mileage", "km", "kilometrage", "compteur"}:
+        return "entretien" if hs & set(COLS["title"]) else "km"
     return "frais"
 
 
@@ -313,34 +359,45 @@ def import_csv(store: CarsStore, vid: str, text: str, kind: str | None = None) -
         raise LubeError("Fichier vide ou illisible")
     detected = csv_kind(list(rows[0].keys()))
     kind = kind or detected
-    if kind == "carburant" and (store.data["vehicles"][vid].get("energy") == "electrique"):
+    electric = store.data["vehicles"][vid].get("energy") == "electrique"
+    if kind == "carburant" and electric:
         kind = "recharge"
-    day_first = detect_day_first([_g(r, "date") or "" for r in rows])
+    day_first = detect_day_first([_g(r, *COLS["date"]) or "" for r in rows])
     seen = {(r["type"], r["date"], r.get("odometer"), round(r.get("cost") or 0, 2)) for r in store.data["records"].values() if r["vehicle_id"] == vid}
     added = skipped = 0
+    by_type: dict[str, int] = {}
     for row in rows:
-        d = parse_date(_g(row, "date"), day_first)
+        d = parse_date(_g(row, *COLS["date"]), day_first)
         if not d:
             skipped += 1
             continue
-        rec = {"vehicle_id": vid, "type": kind, "date": d, "source": "csv",
-               "odometer": parse_number(_g(row, "odometer", "mileage")),
-               "title": _g(row, "description") or {"carburant": "Plein", "recharge": "Recharge", "km": "Relevé"}.get(kind, "Opération"),
-               "cost": parse_number(_g(row, "cost", "price", "prix")) or 0.0,
-               "notes": _g(row, "notes") or "", "tags": _tags(_g(row, "tags"))}
-        if kind in ("carburant", "recharge"):
-            full = _g(row, "isfilltofull", "filltofull")
-            rec["fuel"] = {"qty": parse_number(_g(row, "fuelconsumed", "fuelconsumption", "gallons", "liters", "litres")),
-                           "full": parse_bool(full) if full is not None else True, "missed": parse_bool(_g(row, "missedfuelup") or "")}
-        if kind == "km" and rec["odometer"] is None:
+        k = kind
+        if kind == "mixte":   # type indiqué ligne par ligne
+            k = row_type(_g(row, *COLS["type"])) or ("carburant" if parse_number(_g(row, *COLS["qty"])) else "entretien")
+        if k == "carburant" and electric:
+            k = "recharge"
+        rec = {"vehicle_id": vid, "type": k, "date": d, "source": "csv",
+               "odometer": parse_number(_g(row, *COLS["odometer"])),
+               "title": _g(row, *COLS["title"]) or {"carburant": "Plein", "recharge": "Recharge", "km": "Relevé"}.get(k, "Opération"),
+               "cost": parse_number(_g(row, *COLS["cost"])) or 0.0,
+               "notes": _g(row, *COLS["notes"]) or "", "tags": _tags(str(_g(row, *COLS["tags"]) or "").replace(",", " "))}
+        cat = _g(row, *COLS["category"])
+        if cat:
+            rec["category"] = cat
+        if k in ("carburant", "recharge"):
+            full = _g(row, *COLS["full"])
+            rec["fuel"] = {"qty": parse_number(_g(row, *COLS["qty"])),
+                           "full": parse_bool(full) if full is not None else True, "missed": parse_bool(_g(row, *COLS["missed"]) or "")}
+        if k == "km" and rec["odometer"] is None:
             skipped += 1
             continue
-        key = (kind, d, rec["odometer"], round(rec["cost"], 2))
+        key = (k, d, rec["odometer"], round(rec["cost"], 2))
         if key in seen:
             skipped += 1
             continue
         seen.add(key)
         store.save_record(rec, notify=False)
         added += 1
+        by_type[k] = by_type.get(k, 0) + 1
     store.changed()
-    return {"kind": kind, "detected": detected, "added": added, "skipped": skipped, "day_first": day_first}
+    return {"kind": kind, "detected": detected, "added": added, "skipped": skipped, "day_first": day_first, "by_type": by_type}

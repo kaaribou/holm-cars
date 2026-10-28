@@ -202,3 +202,87 @@ async def test_websocket_et_fichiers(hass: HomeAssistant, hass_ws_client, hass_c
         pass
     import os
     assert not os.path.exists(os.path.join(store.files_dir, up["name"]))
+
+
+async def test_recharge_au_tarif_du_moment(hass: HomeAssistant):
+    """#1 : les kWh sont comptés au prix en vigueur pendant la recharge (bascule HC → HP)."""
+    store = await setup(hass)
+    hass.states.async_set("binary_sensor.ev_charging", "off")
+    hass.states.async_set("sensor.ev_energy", "1000.0", {"unit_of_measurement": "kWh"})
+    hass.states.async_set("sensor.tarif", "0.1296")
+    v = store.save_vehicle({"make": "Leapmotor", "model": "C10", "energy": "electrique",
+                            "charge": {"charging_entity": "binary_sensor.ev_charging", "energy_entity": "sensor.ev_energy",
+                                       "energy_mode": "total", "price_entity": "sensor.tarif"}})
+    await hass.async_block_till_done()
+    hass.states.async_set("binary_sensor.ev_charging", "on")
+    await hass.async_block_till_done()
+    for e in ("1006.0", "1018.2"):        # 18,2 kWh en heures creuses
+        hass.states.async_set("sensor.ev_energy", e, {"unit_of_measurement": "kWh"})
+        await hass.async_block_till_done()
+    assert store.data["charge_sessions"][v["id"]]["slices"] == {"0.12960": pytest.approx(18.2)}
+    hass.states.async_set("sensor.tarif", "0.1609")
+    await hass.async_block_till_done()
+    hass.states.async_set("sensor.ev_energy", "1022.3", {"unit_of_measurement": "kWh"})   # 4,1 kWh en heures pleines
+    hass.states.async_set("binary_sensor.ev_charging", "off")
+    await hass.async_block_till_done()
+    ch = store.records_of(v["id"], ("recharge",))[0]
+    assert ch["fuel"]["qty"] == 22.3
+    assert ch["cost"] == round(18.2 * 0.1296 + 4.1 * 0.1609, 2)
+    assert ch["fuel"]["breakdown"] == [{"kwh": 18.2, "price": 0.1296}, {"kwh": 4.1, "price": 0.1609}]
+    assert "18,2 kWh à 0,1296 €" in ch["notes"] and v["id"] not in store.data["charge_sessions"]
+
+
+async def test_recharge_reprise_apres_redemarrage(hass: HomeAssistant):
+    """La recharge en cours est conservée : un nouveau moniteur la reprend sans repartir de zéro."""
+    store = await setup(hass)
+    hass.states.async_set("binary_sensor.ev_charging", "on")
+    hass.states.async_set("sensor.ev_energy", "10.0", {"unit_of_measurement": "kWh"})
+    v = store.save_vehicle({"make": "Renault", "model": "Zoe", "energy": "electrique",
+                            "charge": {"charging_entity": "binary_sensor.ev_charging", "energy_entity": "sensor.ev_energy",
+                                       "energy_mode": "session", "price": 0.25}})
+    await hass.async_block_till_done()
+    sess = dict(store.data["charge_sessions"][v["id"]])
+    mon = hass.data[DOMAIN]["monitor"]
+    mon.stop()
+    await mon.async_start()          # comme après un redémarrage : session déjà là
+    assert store.data["charge_sessions"][v["id"]]["start"] == sess["start"]
+    hass.states.async_set("sensor.ev_energy", "14.0", {"unit_of_measurement": "kWh"})
+    hass.states.async_set("binary_sensor.ev_charging", "off")
+    await hass.async_block_till_done()
+    ch = store.records_of(v["id"], ("recharge",))[0]
+    assert ch["fuel"]["qty"] == 14.0 and ch["cost"] == 3.5 and ch["fuel"]["breakdown"] == [{"kwh": 14.0, "price": 0.25}]
+
+
+async def test_type_de_vehicule(hass: HomeAssistant):
+    """#2 : type de véhicule ; vélo et trottinette forcément électriques ; « voiture » par défaut."""
+    store = await setup(hass)
+    a = store.save_vehicle({"make": "Peugeot", "model": "208"})
+    b = store.save_vehicle({"make": "Decathlon", "model": "Elops", "kind": "velo_electrique", "energy": "essence"})
+    c = store.save_vehicle({"make": "Yamaha", "model": "MT-07", "kind": "moto", "energy": "essence"})
+    d = store.save_vehicle({"make": "X", "model": "Y", "kind": "fusée"})
+    assert a["kind"] == "voiture" and b["kind"] == "velo_electrique" and b["energy"] == "electrique"
+    assert c["kind"] == "moto" and c["energy"] == "essence" and d["kind"] == "voiture"
+
+
+async def test_import_csv_modele_holm(hass: HomeAssistant):
+    """#3 : modèle CSV HOLM Cars (colonnes en français, type par ligne, « ; » et virgule décimale)."""
+    store = await setup(hass)
+    v = store.save_vehicle({"make": "Dacia", "model": "Jogger"})
+    csv = ("﻿type;date;km;description;Coût (€);quantité;plein;catégorie;notes;étiquettes\n"
+           "carburant;15/01/2026;45200;Plein;68,40;38,5;oui;Total Lyon;;\n"
+           "entretien;02/02/2026;45900;Vidange;129,90;;;Garage Dupont;Huile 5W30;garantie, constructeur\n"
+           "Réparation;20/02/2026;46350;Plaquettes;185,00;;;;;\n"
+           "assurance;05/03/2026;;Assurance;420,00;;;;Annuelle;\n"
+           "km;31/03/2026;47010;Relevé;;;;;;\n"
+           ";01/04/2026;47100;;;;;;;\n")
+    res = import_csv(store, v["id"], csv)
+    assert res["kind"] == "mixte" and res["added"] == 6
+    assert res["by_type"] == {"carburant": 1, "entretien": 2, "reparation": 1, "frais": 1, "km": 1}
+    p = store.records_of(v["id"], ("carburant",))[0]
+    assert p["fuel"]["qty"] == 38.5 and p["fuel"]["full"] is True and p["cost"] == 68.4 and p["category"] == "Total Lyon"
+    e = [r for r in store.records_of(v["id"], ("entretien",)) if r["title"] == "Vidange"][0]
+    assert e["tags"] == ["garantie", "constructeur"] and e["notes"] == "Huile 5W30" and e["date"] == "2026-02-02"
+    assert store.records_of(v["id"], ("frais",))[0]["cost"] == 420.0
+    assert import_csv(store, v["id"], csv)["added"] == 0   # pas de doublons
+    ev = store.save_vehicle({"make": "Tesla", "model": "3", "energy": "electrique"})
+    assert import_csv(store, ev["id"], "type;date;km;cout;kwh\ncarburant;10/01/2026;1000;5,20;30\n")["by_type"] == {"recharge": 1}

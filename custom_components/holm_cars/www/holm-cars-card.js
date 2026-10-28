@@ -4,7 +4,7 @@
  *   title: Garage        view: full | vehicle        vehicle: <id> (view: vehicle)        show_frame: true
  */
 (() => {
-const VERSION = "1.0.1";
+const VERSION = "1.1.0";
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const pad = (n) => String(n).padStart(2, "0");
 const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -27,6 +27,19 @@ const TYPES = {
   km: { l: "Relevé km", i: "mdi:counter", c: "#94a3b8" },
 };
 const COST_TYPES = ["entretien", "reparation", "amelioration", "carburant", "recharge", "frais"];
+// types de véhicules (#2) : libellé et icônes (thermique / électrique)
+const KINDS = {
+  voiture: { l: "Voiture", i: "mdi:car-hatchback", e: "mdi:car-electric" },
+  moto: { l: "Moto", i: "mdi:motorbike", e: "mdi:motorbike-electric" },
+  scooter: { l: "Scooter", i: "mdi:moped", e: "mdi:moped-electric" },
+  velo_electrique: { l: "Vélo électrique", i: "mdi:bicycle-electric", e: "mdi:bicycle-electric" },
+  trottinette: { l: "Trottinette électrique", i: "mdi:scooter-electric", e: "mdi:scooter-electric" },
+  utilitaire: { l: "Utilitaire", i: "mdi:van-utility", e: "mdi:van-utility" },
+  camping_car: { l: "Camping-car", i: "mdi:rv-truck", e: "mdi:rv-truck" },
+  autre: { l: "Autre", i: "mdi:car-side", e: "mdi:car-electric" },
+};
+const ELECTRIC_ONLY = ["velo_electrique", "trottinette"];
+const vIcon = (v) => { const k = KINDS[(v && v.kind) || "voiture"] || KINDS.voiture; return v && v.energy === "electrique" ? k.e : k.i; };
 const ENERGY = { essence: "Essence", diesel: "Diesel", electrique: "Électrique", hybride: "Hybride", hybride_rechargeable: "Hybride rechargeable", gpl: "GPL", e85: "Superéthanol E85" };
 const PRESETS = {
   entretien: ["Vidange + filtres", "Révision", "Contrôle technique", "Pneus", "Plaquettes de frein", "Disques de frein", "Courroie de distribution", "Batterie", "Climatisation", "Essuie-glaces", "Liquide de refroidissement", "Géométrie / parallélisme", "Lavage"],
@@ -176,7 +189,7 @@ class HolmCarsCard extends HTMLElement {
       const n = (v.summary || {}).next;
       const dot = n && n.state !== "ok" ? `<i class="dot ${n.state}"></i>` : "";
       return `<button class="gv ${v.id === this._vid ? "on" : ""} ${v.archived ? "arch" : ""}" data-vid="${v.id}">
-        <span class="gph ${v.image ? "" : "no"}" ${this._img(v.image)}>${v.image ? "" : `<ha-icon icon="${v.energy === "electrique" ? "mdi:car-electric" : "mdi:car-hatchback"}"></ha-icon>`}</span>
+        <span class="gph ${v.image ? "" : "no"}" ${this._img(v.image)}>${v.image ? "" : `<ha-icon icon="${vIcon(v)}"></ha-icon>`}</span>
         <span class="gtx"><small>${esc(v.year || "")}${v.archived ? " · vendue" : ""}</small><b>${esc(v.make || v.name)}</b><span>${esc(v.model || "")}</span>${v.plate ? `<code>${esc(v.plate)}</code>` : ""}</span>${dot}</button>`;
     }).join("")}${this._isAdmin() ? `<button class="gv add" data-act="add-vehicle" title="Ajouter une voiture"><ha-icon icon="mdi:plus"></ha-icon><span>Ajouter</span></button>` : ""}</div>`;
   }
@@ -192,8 +205,8 @@ class HolmCarsCard extends HTMLElement {
     this._recs(v.id, COST_TYPES).filter((r) => (r.date || "").startsWith(String(y))).forEach((r) => { byType[r.type] = (byType[r.type] || 0) + (r.cost || 0); });
     const elec = v.energy === "electrique";
     return `<div class="hero">
-        <div class="hph ${v.image ? "" : "no"}" ${this._img(v.image)}>${v.image ? "" : `<ha-icon icon="mdi:car-side"></ha-icon>`}
-          <div class="hov"><div><small>${esc([v.year, ENERGY[v.energy]].filter(Boolean).join(" · "))}</small><h2>${esc(v.name)}</h2>${v.plate ? `<code>${esc(v.plate)}</code>` : ""}</div>
+        <div class="hph ${v.image ? "" : "no"}" ${this._img(v.image)}>${v.image ? "" : `<ha-icon icon="${vIcon(v)}"></ha-icon>`}
+          <div class="hov"><div><small>${esc([v.kind && v.kind !== "voiture" ? (KINDS[v.kind] || {}).l : "", v.year, ENERGY[v.energy]].filter(Boolean).join(" · "))}</small><h2>${esc(v.name)}</h2>${v.plate ? `<code>${esc(v.plate)}</code>` : ""}</div>
           ${this._isAdmin() ? `<button class="ib glass" data-act="edit-vehicle" title="Modifier la voiture"><ha-icon icon="mdi:pencil"></ha-icon></button>` : ""}</div></div>
         <div class="tiles">
           ${this._tile("mdi:counter", km(sm.odometer), "Kilométrage", v.odometer_entity ? "relevé automatique" : `<button class="lnk" data-new="km">Nouveau relevé</button>`)}
@@ -299,7 +312,7 @@ class HolmCarsCard extends HTMLElement {
     const v = this._veh(); if (!v) return `<div class="empty">Voiture introuvable.</div>`;
     const sm = v.summary || {}, n = this._rems()[0], elec = v.energy === "electrique";
     return `<div class="cmp">
-      <div class="cph ${v.image ? "" : "no"}" ${this._img(v.image)}>${v.image ? "" : `<ha-icon icon="mdi:car-side"></ha-icon>`}</div>
+      <div class="cph ${v.image ? "" : "no"}" ${this._img(v.image)}>${v.image ? "" : `<ha-icon icon="${vIcon(v)}"></ha-icon>`}</div>
       <div class="ctx"><small>${esc(v.year || "")}${v.plate ? ` · ${esc(v.plate)}` : ""}</small><b>${esc(v.name)}</b>
         <span>${km(sm.odometer)} · ${this._money(sm.cost_year)} en ${new Date().getFullYear()}</span></div></div>
       ${n ? this._remRow(n, true) : ""}
@@ -571,7 +584,8 @@ class HolmCarsCard extends HTMLElement {
         <label>Modèle<input class="f" name="model" value="${esc(v.model || "")}" placeholder="Sandero"></label>
         <label>Année<input class="f" name="year" type="number" value="${esc(v.year || "")}"></label>
         <label>Immatriculation<input class="f" name="plate" value="${esc(v.plate || "")}" placeholder="AB-123-CD"></label>
-        <label>Énergie<select class="f" name="energy">${Object.entries(ENERGY).map(([k, l]) => `<option value="${k}" ${(v.energy || "essence") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label>Type<select class="f" name="kind">${Object.entries(KINDS).map(([k, o]) => `<option value="${k}" ${(v.kind || "voiture") === k ? "selected" : ""}>${o.l}</option>`).join("")}</select></label>
+        <label>Énergie<select class="f" name="energy" ${ELECTRIC_ONLY.includes(v.kind) ? "disabled" : ""}>${Object.entries(ENERGY).map(([k, l]) => `<option value="${k}" ${(ELECTRIC_ONLY.includes(v.kind) ? "electrique" : v.energy || "essence") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label>Nom affiché<input class="f" name="name" value="${esc(isNew ? "" : v.name || "")}" placeholder="marque et modèle"></label>
         <label>Kilométrage à l'achat<input class="f" name="initial_odometer" type="number" value="${esc(v.initial_odometer ?? "")}"></label>
         <label>VIN<input class="f" name="vin" value="${esc(v.vin || "")}"></label>
@@ -600,8 +614,14 @@ class HolmCarsCard extends HTMLElement {
         <label class="chk"><input type="checkbox" name="archived" ${v.archived ? "checked" : ""}> Voiture vendue (grisée dans le garage)</label></div></details>` : ""}
       <div class="row end">${!isNew ? `<button class="pill danger" data-x="del"><ha-icon icon="mdi:delete-outline"></ha-icon>Supprimer</button><span class="sp"></span>` : ""}
         <button class="pill main" data-x="save"><ha-icon icon="mdi:check"></ha-icon>${isNew ? "Ajouter" : "Enregistrer"}</button></div>`, { wide: true });
-    const sel = mb.querySelector('[name="energy"]');
-    sel.addEventListener("change", () => mb.querySelector(".echarge").classList.toggle("hide", !["electrique", "hybride_rechargeable"].includes(sel.value)));
+    const sel = mb.querySelector('[name="energy"]'), ksel = mb.querySelector('[name="kind"]');
+    const echarge = () => mb.querySelector(".echarge").classList.toggle("hide", !["electrique", "hybride_rechargeable"].includes(sel.value));
+    sel.addEventListener("change", echarge);
+    ksel.addEventListener("change", () => {   // vélo et trottinette : forcément électriques
+      const only = ELECTRIC_ONLY.includes(ksel.value);
+      if (only) sel.value = "electrique";
+      sel.disabled = only; echarge();
+    });
     mb.querySelector('[name="photo"]').addEventListener("change", async (e) => {
       const f = e.target.files[0]; if (!f) return;
       const box = mb.querySelector(".vimg"); box.classList.add("busy");
@@ -610,7 +630,7 @@ class HolmCarsCard extends HTMLElement {
     });
     mb.querySelector('[data-x="save"]').addEventListener("click", async () => {
       const g = (n) => this._val(mb, n);
-      const d = { id: v.id, image, make: g("make"), model: g("model"), year: g("year"), plate: g("plate").toUpperCase(), energy: g("energy"), vin: g("vin"),
+      const d = { id: v.id, image, make: g("make"), model: g("model"), year: g("year"), plate: g("plate").toUpperCase(), kind: g("kind") || "voiture", energy: ELECTRIC_ONLY.includes(g("kind")) ? "electrique" : g("energy"), vin: g("vin"),
         initial_odometer: num(g("initial_odometer")), purchase_date: g("purchase_date") || null, purchase_price: num(g("purchase_price")),
         odometer_entity: g("odometer_entity") || null,
         charge: { charging_entity: g("charging_entity") || null, energy_entity: g("energy_entity") || null, energy_mode: g("energy_mode"),
@@ -647,6 +667,7 @@ class HolmCarsCard extends HTMLElement {
           ${t !== "km" ? `<label class="full">${isFuel ? "Libellé" : "Intervention"}<input class="f" name="title" list="dl-titles" value="${esc(r.title || (isFuel ? (t === "recharge" ? "Recharge" : "Plein") : ""))}" placeholder="${t === "frais" ? "Assurance, péage…" : "Vidange, pneus…"}"><datalist id="dl-titles">${titles.map((x) => `<option value="${esc(x)}">`).join("")}</datalist></label>` : ""}
           ${isFuel ? `<label>Quantité (${unit})<input class="f" type="number" step="0.01" name="qty" value="${esc(f.qty ?? "")}"></label>` : ""}
           ${t !== "km" ? `<label>Coût (${this._cur()})<input class="f" type="number" step="0.01" name="cost" value="${esc(r.cost ?? "")}"></label>` : ""}
+          ${t === "recharge" && Array.isArray(f.breakdown) && f.breakdown.length > 1 ? `<div class="full brk"><ha-icon icon="mdi:chart-timeline-variant"></ha-icon><span><b>Coût au fil de la recharge</b><br>${f.breakdown.map((b) => `${nf(b.kwh, 1)} kWh à ${nf(b.price, 4)} ${this._cur()}`).join(" · ")}</span></div>` : ""}
           ${isFuel ? `<div class="full unitp" data-unitp></div>
             <label class="chk"><input type="checkbox" name="full" ${f.full !== false ? "checked" : ""}> ${t === "recharge" ? "Recharge complète" : "Plein complet"}</label>
             <label class="chk"><input type="checkbox" name="missed" ${f.missed ? "checked" : ""}> Un plein précédent manque</label>` : ""}
@@ -810,22 +831,45 @@ class HolmCarsCard extends HTMLElement {
     const vs = this._vehicles();
     if (!vs.length) return this._toast("Ajoutez d'abord la voiture concernée");
     const mb = this._modal("Importer un fichier CSV", `
-      <p class="muted">Dans LubeLogger, chaque onglet (Entretien, Réparations, Carburant, Frais, Odomètre…) a un bouton d'export CSV. Importez-les un par un : le type est détecté tout seul, les doublons sont ignorés.</p>
+      <p class="muted">Depuis Excel ou une autre application : partez du <b>modèle HOLM Cars</b> (une ligne par opération, colonne <code>type</code> pour tout mettre dans un seul fichier), puis enregistrez-le en CSV. Les exports CSV de LubeLogger sont aussi reconnus. Les doublons sont ignorés.</p>
+      <div class="row"><button class="pill" data-x="tpl"><ha-icon icon="mdi:file-download-outline"></ha-icon>Télécharger le modèle</button></div>
       <div class="grid2">
         <label>Voiture<select class="f" name="vid">${vs.map((v) => `<option value="${v.id}" ${v.id === this._vid ? "selected" : ""}>${esc(v.name)}</option>`).join("")}</select></label>
-        <label>Type<select class="f" name="kind"><option value="">détection automatique</option>${["entretien", "reparation", "amelioration", "carburant", "frais", "km"].map((k) => `<option value="${k}">${TYPES[k].l}</option>`).join("")}</select></label>
+        <label>Type<select class="f" name="kind"><option value="">détection automatique (colonne type)</option>${["entretien", "reparation", "amelioration", "carburant", "frais", "km"].map((k) => `<option value="${k}">${TYPES[k].l}</option>`).join("")}</select></label>
         <label class="full">Fichier<input class="f" type="file" accept=".csv,text/csv" name="file"></label>
       </div>
-      <div class="muted sm">Entretien, réparations et équipements ont le même format : choisissez le type pour ces fichiers-là.</div>
+      <div class="muted sm">Sans colonne <code>type</code>, toutes les lignes prennent le type choisi ici (exports LubeLogger : entretien, réparations et équipements ont le même format).</div>
       <div class="row end"><button class="pill main" data-x="go"><ha-icon icon="mdi:upload"></ha-icon>Importer</button></div><div class="res"></div>`);
+    mb.querySelector('[data-x="tpl"]').addEventListener("click", () => this._csvTemplate());
     mb.querySelector('[data-x="go"]').addEventListener("click", async () => {
       const f = mb.querySelector('[name="file"]').files[0];
       if (!f) return this._toast("Choisissez un fichier");
       const text = await f.text();
       const r = await this._do(this._ws("csv/import", { vehicle_id: this._val(mb, "vid"), content: text, kind: this._val(mb, "kind") || null }));
-      mb.querySelector(".res").innerHTML = `<div class="okbox"><ha-icon icon="mdi:check-circle"></ha-icon><div><b>${r.added} ${TYPES[r.kind] ? TYPES[r.kind].l.toLowerCase() : ""} importé${r.added > 1 ? "s" : ""}</b>${r.skipped ? ` · ${r.skipped} ignoré${r.skipped > 1 ? "s" : ""} (doublons ou lignes vides)` : ""}<br><small>Dates lues au format ${r.day_first ? "jour/mois" : "mois/jour"}.</small></div></div>`;
+      const det = Object.entries(r.by_type || {}).map(([k, n]) => `${n} ${(TYPES[k] || { l: k }).l.toLowerCase()}`).join(", ");
+      mb.querySelector(".res").innerHTML = `<div class="okbox"><ha-icon icon="mdi:check-circle"></ha-icon><div><b>${r.added} opération${r.added > 1 ? "s" : ""} importée${r.added > 1 ? "s" : ""}</b>${det ? ` (${det})` : ""}${r.skipped ? ` · ${r.skipped} ignoré${r.skipped > 1 ? "s" : ""} (doublons ou lignes vides)` : ""}<br><small>Dates lues au format ${r.day_first ? "jour/mois" : "mois/jour"}.</small></div></div>`;
       mb.querySelector('[name="file"]').value = "";
     });
+  }
+
+  // modèle CSV HOLM Cars (#3) : séparateur « ; » et virgule décimale, comme Excel en français
+  _csvTemplate() {
+    const rows = [
+      ["type", "date", "km", "description", "cout", "quantite", "plein", "categorie", "notes", "etiquettes"],
+      ["carburant", "15/01/2026", "45200", "Plein", "68,40", "38,5", "oui", "Total Lyon", "", ""],
+      ["recharge", "18/01/2026", "45390", "Recharge", "4,85", "32,4", "oui", "Domicile", "", ""],
+      ["entretien", "02/02/2026", "45900", "Vidange", "129,90", "", "", "Garage Dupont", "Huile 5W30", "garantie"],
+      ["reparation", "20/02/2026", "46350", "Plaquettes de frein", "185,00", "", "", "Garage Dupont", "", ""],
+      ["amelioration", "01/03/2026", "", "Tapis de sol", "45,00", "", "", "", "", ""],
+      ["frais", "05/03/2026", "", "Assurance", "420,00", "", "", "", "Annuelle", ""],
+      ["km", "31/03/2026", "47010", "Relevé", "", "", "", "", "", ""],
+    ];
+    const csv = "\ufeff" + rows.map((r) => r.join(";")).join("\r\n") + "\r\n";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    a.download = "modele-holm-cars.csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
 
   getCardSize() { return this._c && this._c.view === "vehicle" ? 4 : 12; }
@@ -986,6 +1030,8 @@ textarea.f { resize:vertical; }
 .grid2 .full, .grid2 .echarge, .grid2 .unitp { grid-column:1 / -1; }
 .grid2 label.chk, label.chk { flex-direction:row; align-items:center; gap:8px; font-size:13px; color:var(--primary-text-color); }
 .unitp { font-size:12.5px; color:var(--ac); font-weight:600; min-height:4px; }
+.brk { display:flex; gap:10px; align-items:flex-start; padding:9px 12px; border-radius:12px; font-size:12.5px; background:color-mix(in srgb, #22c55e 12%, transparent); }
+.brk ha-icon { color:#22c55e; --mdc-icon-size:20px; flex:none; }
 .hide { display:none !important; }
 details { border:1px solid var(--bd); border-radius:13px; padding:8px 12px; margin-top:12px; }
 details summary { cursor:pointer; font-weight:700; font-size:13px; display:flex; align-items:center; gap:7px; list-style:none; } details summary ha-icon { --mdc-icon-size:18px; color:var(--ac); }
